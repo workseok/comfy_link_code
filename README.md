@@ -275,17 +275,31 @@ ComfyUI Sam2VideoSegmentationAddPoints 노드에 넣을 값:
 
 ### 11-1. 준비물: 워크플로우 JSON과 노드 ID
 
-1. ComfyUI 화면에서 배경 합성 워크플로우를 연 상태에서, 메뉴의
-   **"Save (API Format)"**(또는 "Export (API)")로 저장합니다. (화면에 보이는
-   일반 저장과는 다른 파일입니다 — 반드시 "API" 표시가 있는 저장 메뉴를
-   사용해야 합니다.)
-2. 저장된 파일을 이 저장소의 `workflows/` 폴더에 넣습니다 (예: `workflows/background_composite.json`).
-   이 폴더는 회사 내부 워크플로우가 실수로 GitHub에 올라가지 않도록 git에서
-   제외되어 있습니다.
-3. 저장된 JSON 파일을 텍스트 편집기로 열어서 `"Sam2VideoSegmentationAddPoints"`
-   문자열을 찾습니다. 그 앞에 있는 숫자(예: `"6": { "class_type": "Sam2VideoSegmentationAddPoints", ...`
-   의 `"6"`)가 **노드 ID**입니다. 원본 영상을 입력받는 노드(보통 "Load Video"
-   계열)도 같은 방식으로 노드 ID를 찾아둡니다.
+이 프로젝트에서 실제로 쓸 워크플로우는 이미 `workflows/background_composite.json`에
+저장돼 있고, 노드 ID도 확인해뒀습니다 (아래 표). **바로 11-2로 넘어가도 됩니다.**
+
+| 역할 | 노드 ID | 노드 종류 |
+|---|---|---|
+| 원본 영상 입력 | `1` | `VHS_LoadVideo` |
+| 사람 위치 지정 | `11` | `Sam2VideoSegmentationAddPoints` |
+| 결과 영상 저장 | `8` | `VHS_VideoCombine` |
+
+(참고로 이 폴더는 회사 내부 워크플로우가 실수로 GitHub에 올라가지 않도록 git에서
+제외되어 있습니다. `workflows/background_composite.json`은 로컬에만 있고
+커밋되지 않습니다.)
+
+나중에 워크플로우가 바뀌면 아래 순서로 새 노드 ID를 다시 확인하면 됩니다.
+
+1. ComfyUI 화면에서 워크플로우를 연 상태에서, 메뉴의 **"Save (API Format)"**
+   (또는 "Export (API)")로 저장합니다. (화면에 보이는 일반 저장과는 다른
+   파일입니다 — 반드시 "API" 표시가 있는 저장 메뉴를 사용해야 합니다. 일반
+   저장 파일은 `{"nodes": [...], "links": [...]}` 형태이고, API 형식은
+   `{"1": {"class_type": ..., "inputs": {...}}, "2": {...}}` 형태입니다 —
+   확장자는 둘 다 `.json`으로 같으니 파일 내용을 열어서 구분해야 합니다.)
+2. 저장된 JSON 파일을 텍스트 편집기로 열어서 `"Sam2VideoSegmentationAddPoints"`
+   문자열을 찾습니다. 그 앞에 있는 숫자(예: `"11": { "class_type": "Sam2VideoSegmentationAddPoints", ...`
+   의 `"11"`)가 **노드 ID**입니다. 원본 영상을 입력받는 노드(`VHS_LoadVideo`
+   계열)도 같은 방식으로 찾아둡니다.
 
 ### 11-2. 실행
 
@@ -294,8 +308,8 @@ python scripts/send_to_comfyui.py \
     --workflow workflows/background_composite.json \
     --pose-json output/segment_0001_points.json \
     --video segments/segment_0001.mp4 \
-    --pose-node-id 6 \
-    --video-node-id 3 \
+    --pose-node-id 11 \
+    --video-node-id 1 \
     --segment-index 1
 ```
 
@@ -312,13 +326,40 @@ python scripts/send_to_comfyui.py \
 저장됩니다 (`play_segments.py`가 감시하는 바로 그 폴더입니다):
 
 ```
-[안내] 노드 '6'(Sam2VideoSegmentationAddPoints)에 사람 위치 좌표를 넣었습니다.
+[안내] 노드 '11'(Sam2VideoSegmentationAddPoints)에 사람 위치 좌표를 넣었습니다.
+[안내] 노드 '1'(VHS_LoadVideo)의 'video' 입력에 영상 경로를 넣었습니다: segments/segment_0001.mp4
 [전송됨] ComfyUI에 작업을 제출했습니다 (prompt_id=...)
 [대기] ComfyUI 처리 완료를 기다리는 중... (prompt_id=...)
 [완료] 결과 영상을 저장했습니다: output/processed/segment_0001.mp4
 ```
 
-### 11-3. 워크플로우 없이 스크립트 동작만 먼저 확인해보기
+### 11-3. 이 워크플로우에서 참고할 점
+
+`workflows/background_composite.json`을 열어보면서 확인한 내용입니다 (스크립트
+문제가 아니라 워크플로우 자체의 설계에 관한 참고사항입니다).
+
+- **배경은 매번 새로 생성되는 정지 이미지 1장**입니다. `CLIPTextEncode` 노드에
+  고정된 프롬프트("부산 해변, 광안대교, 나무 벤치")로 SDXL이 이미지를 만들고,
+  그 이미지 한 장을 세그먼트 길이만큼 반복(`RepeatImageBatch`)한 뒤 그 위에
+  SAM2로 뽑은 사람 마스크를 합성합니다. 영상 배경이 아니라 고정된 그림입니다.
+- **`KSampler`의 negative 프롬프트가 positive와 같은 `CLIPTextEncode` 노드(17)를
+  참조**하고 있습니다. 보통은 negative용 별도 노드(빈 텍스트나 "low quality" 등)를
+  쓰는데, 지금은 negative 프롬프트가 사실상 없는 것과 같은 효과입니다. 배경
+  이미지 품질에 영향을 줄 수 있으니 확인해보시는 걸 권합니다.
+- **`seed`가 고정값**(`28151948329631`)입니다. ComfyUI 화면에는 "randomize"
+  옵션이 붙어있지만, API로 실행하면 그 옵션은 적용되지 않고 항상 이 시드 값
+  그대로 실행됩니다. 매 세그먼트마다 똑같은 배경 이미지가 나온다는 뜻인데,
+  배경이 계속 같은 그림이어야 자연스러우니 오히려 의도에 맞을 수도 있습니다.
+  다만 세그먼트마다 SDXL 이미지 생성을 매번 새로 돌리는 구조라 처리 시간이
+  걸릴 수 있고, 나중에 "배경 이미지는 한 번만 생성해서 재사용" 식으로
+  최적화할 여지가 있습니다.
+- `Sam2VideoSegmentationAddPoints`(노드 11)의 `coordinates_negative` 입력은
+  `PointsEditor`(노드 12)에 저장된 값을 그대로 사용합니다. `extract_pose_points.py`는
+  negative 좌표를 만들지 않으므로, 이 스크립트는 `coordinates_positive` /
+  `frame_index` / `object_index`만 덮어쓰고 `coordinates_negative`는 건드리지
+  않습니다.
+
+### 11-4. 워크플로우 없이 스크립트 동작만 먼저 확인해보기
 
 아직 워크플로우 JSON이 없거나, ComfyUI 서버를 아직 안 띄워봤어도 이 스크립트가
 서버와 정확히 어떻게 통신하는지(요청 전송 → 처리 대기 → 결과 다운로드) 미리
