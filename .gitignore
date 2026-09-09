@@ -18,3 +18,11 @@ samples/*
 # capture_segments.py가 저장하는 3초 단위 영상 조각 (개인 촬영 영상이라 git에는 올리지 않음)
 segments/*
 !segments/.gitkeep
+
+# 실제 ComfyUI 워크플로우 JSON (회사 내부 워크플로우라 git에는 올리지 않음.
+# 이 폴더에 본인의 워크플로우 파일을 넣고 --workflow 옵션으로 경로를 지정하세요)
+workflows/*
+!workflows/.gitkeep
+
+# send_to_comfyui.py 검증용 가짜 서버가 전송받은 워크플로우를 저장해두는 폴더(있다면)
+received_workflows/

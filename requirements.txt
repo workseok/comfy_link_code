@@ -1,5 +1,8 @@
 # 버전을 고정한 이유: mediapipe 최신 버전(1.x)은 GPU 관련 시스템 라이브러리가 없는
 # 환경(리눅스 서버, WSL 등)에서 오류가 날 수 있어, 안정적으로 검증된 버전으로 고정했습니다.
-opencv-python-headless==4.9.0.80
+#
+# opencv-python-headless가 아니라 opencv-python(화면 창 기능 포함)을 씁니다.
+# play_segments.py가 결과 영상을 화면 창에 띄워야 하기 때문입니다.
+opencv-python==4.9.0.80
 mediapipe==0.10.21
 numpy==1.26.4

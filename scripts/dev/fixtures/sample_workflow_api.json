@@ -1,0 +1,14 @@
+{
+  "3": {
+    "class_type": "LoadVideo",
+    "inputs": { "video": "placeholder.mp4" }
+  },
+  "6": {
+    "class_type": "Sam2VideoSegmentationAddPoints",
+    "inputs": { "coordinates_positive": "[]", "frame_index": 0, "object_index": 0 }
+  },
+  "9": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {}
+  }
+}

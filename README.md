@@ -1,29 +1,34 @@
 # AI 배경 합성 프로토타입
 
-촬영 현장에서 카메라 영상에 AI로 배경을 합성하는 시스템의 일부입니다.
+촬영 현장에서 카메라 영상에 AI로 배경을 합성하는 시스템입니다. 4단계 전체가 이
+저장소에 있습니다.
 
-전체 구조 (4단계) 중 이 저장소는 **1, 2, 3번**을 다룹니다.
-
-| 단계 | 내용 | 상태 |
+| 단계 | 내용 | 스크립트 |
 |---|---|---|
-| 1 | 카메라 영상을 3~5초 단위로 저장 | **이 저장소** ✅ (`scripts/capture_segments.py`) |
-| 2 | 영상 첫 프레임에서 사람 위치 자동 인식 | **이 저장소** ✅ (`scripts/extract_pose_points.py`) |
-| 3 | ComfyUI API로 배경 합성 자동 전송 | **이 저장소** (JSON 준비까지 완료, ComfyUI API 전송은 다음 단계) |
-| 4 | 처리된 결과 영상을 순서대로 재생 | 예정 |
+| 1 | 카메라 영상을 3~5초 단위로 저장 | `scripts/capture_segments.py` ✅ |
+| 2 | 영상 첫 프레임에서 사람 위치 자동 인식 | `scripts/extract_pose_points.py` ✅ |
+| 3 | ComfyUI API로 배경 합성 자동 전송 | `scripts/send_to_comfyui.py` ✅ |
+| 4 | 처리된 결과 영상을 순서대로 화면에 재생 | `scripts/play_segments.py` ✅ |
 
-이 저장소에는 스크립트 2개가 있습니다.
+**전체 흐름**: 카메라 → ①3초 조각 저장 → ②조각 첫 프레임에서 사람 위치 검출 →
+③ComfyUI에 전송해서 배경 합성 → ④합성된 조각을 순서대로 화면에 재생.
 
-- **`scripts/capture_segments.py`** — 웹캠에서 영상을 받아 **3초 단위**로 끊어서
-  `segments/` 폴더에 `segment_0001.mp4`, `segment_0002.mp4` ... 순서로 저장합니다.
-- **`scripts/extract_pose_points.py`** — 영상 파일 하나를 입력받아 **첫 프레임**을
-  추출하고, **MediaPipe Pose**로 사람의 코 / 양쪽 어깨 / 양쪽 골반 위치를 자동으로
-  찾아서 ComfyUI의 **`Sam2VideoSegmentationAddPoints`** 노드가 요구하는 형식의
-  **JSON**으로 저장합니다. 검출된 점을 눈으로 확인할 수 있도록 미리보기 이미지도
-  함께 저장됩니다.
+```
+capture_segments.py            extract_pose_points.py          send_to_comfyui.py                play_segments.py
+(웹캠 → 3초 조각)      →      (조각 첫 프레임 → 사람 위치 JSON)  →  (JSON+워크플로우 → ComfyUI → 결과 영상) →  (결과 조각을 화면에 순서대로 재생)
+segments/segment_0001.mp4      output/segment_0001_points.json     output/processed/segment_0001.mp4
+```
 
-두 스크립트를 이어서 쓰면: `capture_segments.py`가 만든 `segments/segment_0001.mp4`를
-`extract_pose_points.py --video segments/segment_0001.mp4`로 넘겨서 사람 위치를
-찾고, 그다음 조각(`segment_0002.mp4`)도 같은 방식으로 반복하면 됩니다.
+> **3번 단계에 대한 중요한 전제**: `send_to_comfyui.py`는 배경 합성을 실제로
+> 수행하는 **ComfyUI 워크플로우 JSON 파일**이 있어야 동작합니다. 이 저장소를 만든
+> 시점에는 아직 그 워크플로우가 없어서, 나중에 전달받는 즉시 끼워 쓸 수 있도록
+> **범용적인 "전송기"** 형태로 만들어뒀습니다. 워크플로우가 오면 `workflows/`
+> 폴더에 넣고 노드 ID 몇 개만 지정하면 됩니다. 자세한 내용은 아래 "11. ComfyUI로
+> 배경 합성 전송하기" 항목을 참고하세요.
+>
+> 이 스크립트 자체(요청 전송 → 처리 대기 → 결과 다운로드 로직)는 실제 ComfyUI
+> 서버 없이도 **가짜(mock) ComfyUI 서버**로 왕복 전체를 검증했습니다
+> (`scripts/dev/mock_comfyui_server.py`, 아래에서 설명).
 
 ---
 
@@ -109,9 +114,12 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-- `opencv-python-headless`: 영상 파일을 열고 프레임을 다루는 패키지
+- `opencv-python`: 영상 파일/카메라를 열고 프레임을 다루고, 화면 창에 재생하는 패키지
 - `mediapipe`: 구글에서 만든 사람 자세(관절 위치) 인식 AI 패키지
 - `numpy`: 좌표 계산에 쓰이는 수학 패키지
+
+(`send_to_comfyui.py`는 파이썬에 기본 내장된 기능만 사용해서 별도 패키지가
+필요 없습니다.)
 
 버전을 정확히 고정해 두었으니 (`requirements.txt` 참고) 그대로 설치하면 이 문서에서
 검증한 것과 동일하게 동작합니다.
@@ -255,11 +263,122 @@ ComfyUI Sam2VideoSegmentationAddPoints 노드에 넣을 값:
   노드—에 연결해서 넣게 됩니다.)
 - `frame_index`, `object_index`는 각각 해당 숫자 입력 칸에 그대로 넣습니다.
 
-같은 내용이 `output/pose_points.json` 파일에도 저장되어 있으니, 나중에
-3번 단계(ComfyUI API 자동 전송)를 만들 때 이 JSON 파일을 그대로 읽어서 API 요청에
-넣으면 됩니다.
+같은 내용이 `output/pose_points.json` 파일에도 저장되어 있고, 이 JSON 파일을
+바로 다음 단계인 `send_to_comfyui.py`가 그대로 읽어서 API 요청에 자동으로
+넣어줍니다 (직접 복사/붙여넣기 하지 않아도 됩니다).
 
-## 11. 문제 해결 (Troubleshooting)
+## 11. ComfyUI로 배경 합성 전송하기 (`send_to_comfyui.py`)
+
+이 스크립트는 ①번이 만든 사람 위치 JSON을 ComfyUI **워크플로우**(배경을 어떻게
+합성할지 정의한 노드 그래프)에 끼워 넣어서 ComfyUI 서버로 전송하고, 처리가
+끝난 결과 영상을 받아옵니다.
+
+### 11-1. 준비물: 워크플로우 JSON과 노드 ID
+
+1. ComfyUI 화면에서 배경 합성 워크플로우를 연 상태에서, 메뉴의
+   **"Save (API Format)"**(또는 "Export (API)")로 저장합니다. (화면에 보이는
+   일반 저장과는 다른 파일입니다 — 반드시 "API" 표시가 있는 저장 메뉴를
+   사용해야 합니다.)
+2. 저장된 파일을 이 저장소의 `workflows/` 폴더에 넣습니다 (예: `workflows/background_composite.json`).
+   이 폴더는 회사 내부 워크플로우가 실수로 GitHub에 올라가지 않도록 git에서
+   제외되어 있습니다.
+3. 저장된 JSON 파일을 텍스트 편집기로 열어서 `"Sam2VideoSegmentationAddPoints"`
+   문자열을 찾습니다. 그 앞에 있는 숫자(예: `"6": { "class_type": "Sam2VideoSegmentationAddPoints", ...`
+   의 `"6"`)가 **노드 ID**입니다. 원본 영상을 입력받는 노드(보통 "Load Video"
+   계열)도 같은 방식으로 노드 ID를 찾아둡니다.
+
+### 11-2. 실행
+
+```
+python scripts/send_to_comfyui.py \
+    --workflow workflows/background_composite.json \
+    --pose-json output/segment_0001_points.json \
+    --video segments/segment_0001.mp4 \
+    --pose-node-id 6 \
+    --video-node-id 3 \
+    --segment-index 1
+```
+
+- `--workflow` : 워크플로우 JSON 경로
+- `--pose-json` : `extract_pose_points.py`가 만든 JSON 경로
+- `--video`, `--video-node-id` : 원본 영상 경로와, 그 영상을 넣을 노드 ID
+  (워크플로우에 이미 영상 경로가 고정되어 있어서 매번 바꿀 필요가 없다면 생략 가능)
+- `--pose-node-id` : `Sam2VideoSegmentationAddPoints` 노드 ID (필수)
+- `--segment-index` : 결과 파일 이름에 쓸 순서 번호 (1이면 `segment_0001.mp4`로 저장됨)
+- `--server` : ComfyUI 서버 주소 (기본값 `http://127.0.0.1:8188` — 같은 컴퓨터에서
+  ComfyUI를 띄웠다면 그대로 두면 됩니다)
+
+정상 처리되면 아래처럼 출력되고, 결과 영상이 `output/processed/segment_0001.mp4`에
+저장됩니다 (`play_segments.py`가 감시하는 바로 그 폴더입니다):
+
+```
+[안내] 노드 '6'(Sam2VideoSegmentationAddPoints)에 사람 위치 좌표를 넣었습니다.
+[전송됨] ComfyUI에 작업을 제출했습니다 (prompt_id=...)
+[대기] ComfyUI 처리 완료를 기다리는 중... (prompt_id=...)
+[완료] 결과 영상을 저장했습니다: output/processed/segment_0001.mp4
+```
+
+### 11-3. 워크플로우 없이 스크립트 동작만 먼저 확인해보기
+
+아직 워크플로우 JSON이 없거나, ComfyUI 서버를 아직 안 띄워봤어도 이 스크립트가
+서버와 정확히 어떻게 통신하는지(요청 전송 → 처리 대기 → 결과 다운로드) 미리
+확인해볼 수 있습니다. 이 저장소에는 진짜 ComfyUI 서버처럼 응답하는 **가짜(mock)
+서버**가 포함되어 있습니다 (실제로 배경을 합성하지는 않고, 지정한 샘플 영상을
+그대로 "결과"인 것처럼 돌려줍니다).
+
+터미널 두 개를 엽니다.
+
+**터미널 1** (가짜 서버 실행):
+```
+python scripts/dev/mock_comfyui_server.py --sample-video samples/test_video.mp4
+```
+
+**터미널 2** (전송 스크립트 실행 — 저장소에 포함된 테스트용 워크플로우 사용):
+```
+python scripts/send_to_comfyui.py \
+    --workflow scripts/dev/fixtures/sample_workflow_api.json \
+    --pose-json output/pose_points.json \
+    --video samples/test_video.mp4 \
+    --pose-node-id 6 \
+    --video-node-id 3 \
+    --segment-index 1
+```
+
+`output/processed/segment_0001.mp4`가 생기면 정상입니다. 실제 워크플로우를
+받으면 `--workflow`와 `--pose-node-id`/`--video-node-id`만 실제 값으로 바꿔서
+똑같이 쓰면 됩니다.
+
+## 12. 결과를 화면에 순서대로 재생하기 (`play_segments.py`)
+
+`send_to_comfyui.py`가 `output/processed/` 폴더에 결과 영상을 쌓아가면, 이
+스크립트가 그 폴더를 감시하면서 `segment_0001.mp4`부터 순서대로 화면에
+재생합니다. 아직 처리되지 않은 조각은 "처리 대기 중" 화면을 보여주며 기다렸다가,
+파일이 생기는 즉시 이어서 재생합니다 (몇 초 지연은 자연스럽게 흡수됩니다).
+
+```
+python scripts/play_segments.py
+```
+
+- 다른 키를 누르면 현재 조각을 건너뛰고 다음 조각으로 넘어갑니다.
+- `q`를 누르면 종료합니다.
+- `--input-dir`로 감시할 폴더를, `--start-index`로 시작 번호를 바꿀 수 있습니다.
+
+실제 촬영 파이프라인에서는 4개 스크립트를 아래처럼 각자 계속 돌려두면 됩니다
+(터미널 4개, 또는 다른 방식의 자동화):
+
+```
+터미널 1: python scripts/capture_segments.py                     # 카메라 → segments/
+터미널 2: (segments/에 새 조각이 생길 때마다) extract_pose_points.py 실행
+터미널 3: (JSON이 생길 때마다) send_to_comfyui.py 실행 → output/processed/
+터미널 4: python scripts/play_segments.py                        # output/processed/ 재생
+```
+
+> 터미널 2, 3을 매번 손으로 실행하는 대신 자동으로 돌리는 부분(새 파일이 생기면
+> 자동 실행)은 아직 만들지 않았습니다. 지금은 4개 스크립트 각각의 기능이
+> 준비된 단계이고, 필요하시면 이 부분을 감시 자동화 스크립트로 이어서
+> 만들어드릴 수 있습니다.
+
+## 13. 문제 해결 (Troubleshooting)
 
 **`python` 명령을 찾을 수 없다는 오류가 날 때**
 → 1번(Python 설치)에서 "Add python.exe to PATH" 체크를 빠뜨렸을 가능성이 큽니다.
@@ -295,6 +414,25 @@ Python을 다시 설치하면서 체크박스를 확인하세요.
 sudo apt-get update && sudo apt-get install -y libegl1 libgl1
 ```
 (Windows/macOS에서는 이 문제가 발생하지 않습니다.)
+
+**`send_to_comfyui.py` 실행 시 "ComfyUI 서버에 연결할 수 없습니다" 라고 나올 때**
+→ 다음을 확인해 보세요.
+1. ComfyUI가 실제로 실행 중인지 (ComfyUI를 실행하면 보통 터미널에 "Starting server"와
+   함께 주소가 표시됩니다)
+2. `--server` 값이 ComfyUI가 실제로 뜬 주소와 일치하는지 (기본값은
+   `http://127.0.0.1:8188`이며, 같은 컴퓨터에서 기본 설정으로 띄웠다면 보통 맞습니다)
+3. ComfyUI가 다른 컴퓨터에서 돌고 있다면, 그 컴퓨터의 IP 주소로 `--server`를
+   지정해야 합니다 (예: `--server http://192.168.0.10:8188`)
+
+**`send_to_comfyui.py` 실행 시 "워크플로우에 노드 ID '...'가 없습니다" 라고 나올 때**
+→ `--pose-node-id` 또는 `--video-node-id`로 지정한 번호가 실제 워크플로우 JSON
+파일 안의 노드 ID와 다릅니다. 워크플로우 JSON 파일을 텍스트 편집기로 열어서
+해당 노드(`Sam2VideoSegmentationAddPoints` 등)를 찾고, 그 노드를 감싸는 큰따옴표
+숫자 키를 다시 확인하세요.
+
+**`play_segments.py` 실행 시 화면 창이 안 뜨거나 바로 꺼질 때**
+→ 원격 데스크톱/SSH로 접속해서 실행 중이라면, 화면 출력(그래픽) 세션이 연결되어
+있는지 확인하세요. 컴퓨터에 직접 앉아서 실행하는 경우라면 보통 문제가 없습니다.
 
 ---
 
