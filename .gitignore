@@ -14,3 +14,7 @@ output/*
 # 테스트용으로 넣는 샘플 영상 (용량 문제로 git에는 올리지 않음. 필요하면 직접 추가하세요)
 samples/*
 !samples/.gitkeep
+
+# capture_segments.py가 저장하는 3초 단위 영상 조각 (개인 촬영 영상이라 git에는 올리지 않음)
+segments/*
+!segments/.gitkeep
