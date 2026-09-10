@@ -466,6 +466,64 @@ python scripts/send_to_comfyui.py \
 받으면 `--workflow`와 `--pose-node-id`/`--video-node-id`만 실제 값으로 바꿔서
 똑같이 쓰면 됩니다.
 
+### 11-5. ComfyUI Cloud(https://cloud.comfy.org)로 실행하기
+
+로컬 ComfyUI 대신 ComfyUI Cloud를 쓸 수도 있습니다. `--platform cloud`를 붙이면
+됩니다 (엔드포인트 경로와 인증 방식이 로컬과 달라서 내부적으로 다르게 동작합니다).
+
+**API 키를 받으면 그대로 실행할 명령 (준비 완료)**:
+
+```
+export COMFY_API_KEY="sk-..."   # 실제 발급받은 키로 교체. 절대 커맨드 인자로 넘기지 말 것
+
+python scripts/send_to_comfyui.py \
+    --platform cloud \
+    --server https://cloud.comfy.org \
+    --workflow workflows/background_composite.json \
+    --pose-json output/segment_0001_points.json \
+    --video segments/segment_0001.mp4 \
+    --pose-node-id 11 \
+    --video-node-id 1 \
+    --frame-load-cap 30 \
+    --repeat-node-id 6 \
+    --segment-index 1 \
+    --dry-run
+```
+
+먼저 `--dry-run`으로 한 번 실행해서 `output/dry_run_workflow.json`을 열어보고,
+`coordinates_positive`/`frame_load_cap`(30)/`amount`(30)가 의도대로 들어갔는지
+확인한 뒤, **`--dry-run`을 빼고** 다시 실행하면 실제로 ComfyUI Cloud에 전송됩니다.
+`--frame-load-cap 30`은 처리할 프레임 수를 30개(1초 분량)로 줄여서 크레딧을
+아끼기 위한 것이고, `--repeat-node-id 6`은 배경 반복 프레임 수를 그 30에 맞춰서
+함께 줄이는 옵션입니다. 이 워크플로우가 원래 갖고 있던 negative 포인트, CPU
+디바이스(`device: cpu`), `mp4/h264`, `crf 18` 설정은 스크립트가 건드리지 않으므로
+그대로 유지됩니다.
+
+- `--api-key-env` (기본값 `COMFY_API_KEY`): API 키를 어느 환경변수에서 읽을지.
+  **API 키는 항상 환경변수로만 주고, `--api-key-env` 자체에 키 값을 직접 넣지
+  마세요** (쉘 기록에 남습니다).
+- 인증 헤더는 `X-API-Key`(ComfyUI Cloud 방식)를 사용합니다. Bearer 토큰이
+  아닙니다.
+
+> **이 저장소를 만든 환경(원격 개발 서버)에서는 실제 전송을 확인하지 못했습니다.**
+> `cloud.comfy.org`로 나가는 네트워크 자체가 이 환경의 조직 정책으로 차단되어
+> 있어서(`CONNECT` 요청이 403으로 거부됨), API 키가 있어도 이 환경에서는
+> 애초에 접속이 안 됩니다. 대신:
+> - 요청/응답 로직(작업 제출 → `X-API-Key` 인증 → 상태 폴링 → 파일 다운로드 →
+>   `--frame-load-cap`/`--repeat-node-id` 값 주입)은 ComfyUI Cloud API 스펙을
+>   그대로 흉내 낸 가짜 서버(`scripts/dev/mock_comfyui_server.py`)로 실제 왕복
+>   테스트를 마쳤습니다. 인증 실패(401) 상황도 확인했습니다.
+> - 실제 `cloud.comfy.org`의 정확한 API 응답 형식(특히 작업 ID 필드 이름이
+>   `job_id`인지, `GET /api/jobs/{id}` 응답의 완료 상태 문자열이 정확히 무엇인지)은
+>   공식 문서가 검색 결과로만 확인 가능했고 원문 페이지 접근은 막혀 있어서,
+>   100% 확정하지는 못했습니다. 코드는 `job_id`/`prompt_id`/`id`, `completed`/
+>   `success`/`succeeded` 등 후보를 여러 개 함께 확인하도록 방어적으로 만들어
+>   뒀지만, 실제 응답이 이 가정과 다르면 원문 오류 메시지를 그대로 보여주게
+>   되어 있으니 처음 실행할 때 로그를 확인해 주세요.
+> - 회사 컴퓨터(또는 `cloud.comfy.org` 접속이 되는 다른 환경)에서 API 키를 받고
+>   위 명령을 실행하면 됩니다. 실패하면 나온 오류 메시지를 그대로 알려주세요 —
+>   특히 작업 ID나 완료 상태 판단이 어긋났다면 그 부분만 고치면 됩니다.
+
 ## 12. 결과를 화면에 순서대로 재생하기 (`play_segments.py`)
 
 `send_to_comfyui.py`가 `output/processed/` 폴더에 결과 영상을 쌓아가면, 이
