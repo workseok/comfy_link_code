@@ -608,5 +608,107 @@ def main():
     verify_downloaded_video(output_path)
 
 
+# ---------------------------------------------------------------------------
+# 공통 인터페이스 (comfyui_client.local_client와 동일한 시그니처)
+#
+# main.py처럼 이 스크립트를 CLI가 아니라 코드에서 직접 호출하고 싶을 때 쓰는
+# 함수다. 위쪽의 CLI 로직(parse_args/main 및 그 아래에서 호출하는 모든 함수)은
+# 이 함수를 추가하면서 단 한 줄도 바꾸지 않았다 — 이 스크립트를 그대로
+# `python comfyui_client/cloud_client.py ...`로 실행하는 기존 방식은 이전과
+# 완전히 동일하게 동작한다. send_frame()은 그 로직(cloud 분기 부분)을 함수
+# 하나로 감싸서 재사용할 뿐이다.
+# ---------------------------------------------------------------------------
+
+
+def send_frame(
+    frame: str,
+    prompt_point,
+    *,
+    workflow_path: str,
+    pose_node_id: str,
+    video_node_id: str | None = None,
+    video_input_key: str = "video",
+    frame_load_cap: int | None = None,
+    repeat_node_id: str | None = None,
+    repeat_amount_key: str = "amount",
+    server: str = "https://cloud.comfy.org",
+    api_key_env: str = "COMFY_API_KEY",
+    comfy_org_api_key_env: str | None = None,
+    output_dir: str = os.path.join("output", "processed"),
+    segment_index: int,
+    timeout_seconds: float = 300.0,
+    poll_seconds: float = 2.0,
+    dry_run: bool = False,
+    dry_run_output: str | None = None,
+) -> str:
+    """ComfyUI Cloud로 세그먼트 영상 하나를 보내고 결과 영상 경로를 반환한다.
+
+    local_client.send_frame()과 동일한 이름/인자 구성을 가진 이 프로젝트의
+    "공통 인터페이스"다. main.py는 --backend 값에 따라 이 함수 또는
+    local_client.send_frame()을 고르기만 하면 되고, 호출 코드는 바뀌지 않는다.
+
+    인자:
+        frame:        처리할 세그먼트 영상 파일 경로 (예: segments/segment_0001.mp4)
+        prompt_point: extract_pose_points.py가 만든 pose 데이터. 파싱된 dict를
+                      직접 넘기거나, 그 JSON 파일 경로(str)를 넘겨도 된다.
+        그 외 키워드 인자는 이 스크립트의 동명 CLI 옵션(--workflow, --pose-node-id,
+        --video-node-id, --frame-load-cap, --server, --api-key-env, ...)과 의미가
+        같다.
+
+    반환값: 저장된 결과 영상 파일 경로. --dry-run이면 저장된 워크플로우 JSON 경로.
+
+    실패 시: 기존 CLI 함수들(submit_prompt_cloud 등)이 하던 대로 오류 메시지를
+    출력하고 sys.exit(1)로 종료한다 (이 부분도 기존 동작을 그대로 재사용한 것이라
+    바꾸지 않았다). 라이브러리답게 예외를 던지길 원한다면 이 함수를 별도
+    프로세스로 감싸서 호출하는 것을 권장한다.
+    """
+    workflow = load_json(workflow_path)
+    pose_data = prompt_point if isinstance(prompt_point, dict) else load_json(prompt_point)
+
+    inject_pose_inputs(workflow, pose_node_id, pose_data)
+    if video_node_id:
+        inject_video_input(workflow, video_node_id, video_input_key, frame)
+    if frame_load_cap:
+        inject_frame_cap(workflow, video_node_id, frame_load_cap, repeat_node_id, repeat_amount_key)
+
+    if dry_run:
+        dry_run_path = dry_run_output or os.path.join("output", "dry_run_workflow.json")
+        os.makedirs(os.path.dirname(dry_run_path) or ".", exist_ok=True)
+        with open(dry_run_path, "w", encoding="utf-8") as f:
+            json.dump(workflow, f, ensure_ascii=False, indent=2)
+        print(f"\n[dry-run] 실제로 전송하지 않았습니다. 최종 워크플로우를 저장했습니다: {dry_run_path}")
+        return dry_run_path
+
+    api_key = os.environ.get(api_key_env)
+    if not api_key:
+        print(
+            f"[오류] 환경변수 {api_key_env}가 설정되어 있지 않습니다. "
+            f"API 키를 발급받은 뒤 터미널에서 `export {api_key_env}=sk-...`로 "
+            "설정하고 다시 실행해 주세요."
+        )
+        sys.exit(1)
+    comfy_org_api_key = os.environ.get(comfy_org_api_key_env) if comfy_org_api_key_env else None
+
+    job_id, _ = submit_prompt_cloud(server, workflow, api_key, comfy_org_api_key)
+    print(f"[전송됨] ComfyUI Cloud에 작업을 제출했습니다 (job_id={job_id})")
+
+    result = wait_for_result_cloud(server, job_id, api_key, timeout_seconds, poll_seconds)
+
+    file_info = find_output_file(result)
+    if file_info is None:
+        print(
+            "[오류] 처리는 끝났지만 결과 파일을 찾지 못했습니다. "
+            f"작업 응답: {json.dumps(result, ensure_ascii=False)[:2000]}"
+        )
+        sys.exit(1)
+
+    output_path = os.path.join(output_dir, f"segment_{segment_index:04d}.mp4")
+    download_output_cloud(server, api_key, file_info, output_path)
+
+    print(f"[완료] 결과 영상을 저장했습니다: {output_path}")
+    verify_downloaded_video(output_path)
+    return output_path
+
+
 if __name__ == "__main__":
     main()

@@ -7,19 +7,19 @@
 |---|---|---|
 | 1 | 카메라 영상을 3~5초 단위로 저장 | `scripts/capture_segments.py` ✅ |
 | 2 | 영상 첫 프레임에서 사람 위치 자동 인식 | `scripts/extract_pose_points.py` ✅ |
-| 3 | ComfyUI API로 배경 합성 자동 전송 | `scripts/send_to_comfyui.py` ✅ |
+| 3 | ComfyUI API로 배경 합성 자동 전송 | `comfyui_client/cloud_client.py` ✅ |
 | 4 | 처리된 결과 영상을 순서대로 화면에 재생 | `scripts/play_segments.py` ✅ |
 
 **전체 흐름**: 카메라 → ①3초 조각 저장 → ②조각 첫 프레임에서 사람 위치 검출 →
 ③ComfyUI에 전송해서 배경 합성 → ④합성된 조각을 순서대로 화면에 재생.
 
 ```
-capture_segments.py            extract_pose_points.py          send_to_comfyui.py                play_segments.py
+capture_segments.py            extract_pose_points.py          cloud_client.py                play_segments.py
 (웹캠 → 3초 조각)      →      (조각 첫 프레임 → 사람 위치 JSON)  →  (JSON+워크플로우 → ComfyUI → 결과 영상) →  (결과 조각을 화면에 순서대로 재생)
 segments/segment_0001.mp4      output/segment_0001_points.json     output/processed/segment_0001.mp4
 ```
 
-> **3번 단계에 대한 중요한 전제**: `send_to_comfyui.py`는 배경 합성을 실제로
+> **3번 단계에 대한 중요한 전제**: `cloud_client.py`는 배경 합성을 실제로
 > 수행하는 **ComfyUI 워크플로우 JSON 파일**이 있어야 동작합니다. 이 저장소를 만든
 > 시점에는 아직 그 워크플로우가 없어서, 나중에 전달받는 즉시 끼워 쓸 수 있도록
 > **범용적인 "전송기"** 형태로 만들어뒀습니다. 워크플로우가 오면 `workflows/`
@@ -118,7 +118,7 @@ pip install -r requirements.txt
 - `mediapipe`: 구글에서 만든 사람 자세(관절 위치) 인식 AI 패키지
 - `numpy`: 좌표 계산에 쓰이는 수학 패키지
 
-(`send_to_comfyui.py`는 파이썬에 기본 내장된 기능만 사용해서 별도 패키지가
+(`cloud_client.py`는 파이썬에 기본 내장된 기능만 사용해서 별도 패키지가
 필요 없습니다.)
 
 버전을 정확히 고정해 두었으니 (`requirements.txt` 참고) 그대로 설치하면 이 문서에서
@@ -341,14 +341,29 @@ ComfyUI Sam2VideoSegmentationAddPoints 노드에 넣을 값:
 - `frame_index`, `object_index`는 각각 해당 숫자 입력 칸에 그대로 넣습니다.
 
 같은 내용이 `output/pose_points.json` 파일에도 저장되어 있고, 이 JSON 파일을
-바로 다음 단계인 `send_to_comfyui.py`가 그대로 읽어서 API 요청에 자동으로
+바로 다음 단계인 `cloud_client.py`가 그대로 읽어서 API 요청에 자동으로
 넣어줍니다 (직접 복사/붙여넣기 하지 않아도 됩니다).
 
-## 11. ComfyUI로 배경 합성 전송하기 (`send_to_comfyui.py`)
+## 11. ComfyUI로 배경 합성 전송하기 (`comfyui_client/`)
 
-이 스크립트는 ①번이 만든 사람 위치 JSON을 ComfyUI **워크플로우**(배경을 어떻게
-합성할지 정의한 노드 그래프)에 끼워 넣어서 ComfyUI 서버로 전송하고, 처리가
-끝난 결과 영상을 받아옵니다.
+이 단계는 `comfyui_client/` 패키지로 구성되어 있습니다. ①번이 만든 사람 위치
+JSON을 ComfyUI **워크플로우**(배경을 어떻게 합성할지 정의한 노드 그래프)에
+끼워 넣어서 ComfyUI 서버로 전송하고, 처리가 끝난 결과 영상을 받아옵니다.
+
+- **`comfyui_client/cloud_client.py`** — ComfyUI Cloud(https://cloud.comfy.org)
+  전용. 예전에는 `scripts/send_to_comfyui.py`였던 파일을 이름/위치만 바꿔
+  그대로 옮긴 것이라, **동작은 이전과 완전히 동일**합니다. 지금까지처럼
+  `python comfyui_client/cloud_client.py ...` 로 직접 실행해도 되고, 아래
+  11-6에서 설명하는 `main.py`를 통해 실행해도 됩니다.
+- **`comfyui_client/local_client.py`** — 로컬 ComfyUI(`http://127.0.0.1:8188`)
+  전용. 아직 미구현이며(다음 단계에서 작성 예정), 지금 불러오면 "아직
+  구현되지 않았습니다"라는 안내와 함께 종료됩니다.
+- 두 모듈 모두 `send_frame(frame, prompt_point, ...)`라는 같은 이름의 함수를
+  제공해서(로컬 것은 지금은 껍데기뿐), `main.py`가 `--backend cloud`/`--backend
+  local` 중 무엇을 고르든 호출하는 코드는 똑같습니다.
+
+아래 11-1~11-4는 예전과 동일한 내용이며, 파일 경로만 `comfyui_client/cloud_client.py`로
+바뀌었습니다.
 
 ### 11-1. 준비물: 워크플로우 JSON과 노드 ID
 
@@ -381,7 +396,7 @@ ComfyUI Sam2VideoSegmentationAddPoints 노드에 넣을 값:
 ### 11-2. 실행
 
 ```
-python scripts/send_to_comfyui.py \
+python comfyui_client/cloud_client.py \
     --workflow workflows/background_composite.json \
     --pose-json output/segment_0001_points.json \
     --video segments/segment_0001.mp4 \
@@ -453,7 +468,7 @@ python scripts/dev/mock_comfyui_server.py --sample-video samples/test_video.mp4
 
 **터미널 2** (전송 스크립트 실행 — 저장소에 포함된 테스트용 워크플로우 사용):
 ```
-python scripts/send_to_comfyui.py \
+python comfyui_client/cloud_client.py \
     --workflow scripts/dev/fixtures/sample_workflow_api.json \
     --pose-json output/pose_points.json \
     --video samples/test_video.mp4 \
@@ -476,7 +491,7 @@ python scripts/send_to_comfyui.py \
 ```
 export COMFY_API_KEY="sk-..."   # 실제 발급받은 키로 교체. 절대 커맨드 인자로 넘기지 말 것
 
-python scripts/send_to_comfyui.py \
+python comfyui_client/cloud_client.py \
     --platform cloud \
     --server https://cloud.comfy.org \
     --workflow workflows/background_composite.json \
@@ -524,9 +539,43 @@ python scripts/send_to_comfyui.py \
 >   위 명령을 실행하면 됩니다. 실패하면 나온 오류 메시지를 그대로 알려주세요 —
 >   특히 작업 ID나 완료 상태 판단이 어긋났다면 그 부분만 고치면 됩니다.
 
+### 11-6. `main.py`로 실행하기 (cloud/local 공용 진입점)
+
+`comfyui_client/cloud_client.py`를 직접 실행하는 대신, 저장소 최상위의
+`main.py`를 통해 실행할 수도 있습니다. `--backend` 옵션으로 클라우드/로컬을
+고르는데, **기본값이 `cloud`라서 옵션을 안 주면 지금까지와 완전히 같은
+동작**입니다.
+
+```
+python main.py \
+    --workflow workflows/background_composite.json \
+    --frame segments/segment_0001.mp4 \
+    --prompt-point output/segment_0001_points.json \
+    --pose-node-id 11 \
+    --video-node-id 1 \
+    --frame-load-cap 30 \
+    --repeat-node-id 6 \
+    --segment-index 1
+```
+
+`comfyui_client/cloud_client.py`를 직접 실행할 때와 옵션 이름이 대부분
+같은데, 두 가지만 다릅니다: `--video` 대신 `--frame`(처리할 세그먼트 영상
+경로), `--pose-json` 대신 `--prompt-point`(사람 위치 JSON 경로)를 씁니다.
+나중에 `--backend local`이 준비되면(local_client.py, 다음 단계) 같은
+명령에 `--backend local`만 추가하면 됩니다 — 지금 시도하면 아직
+미구현이라는 안내와 함께 종료됩니다.
+
+이 저장소를 검증할 때는, 가짜(mock) ComfyUI 서버를 대상으로 (1)
+`comfyui_client/cloud_client.py`를 예전과 같은 방식으로 직접 실행한 결과와
+(2) `main.py`를 통해 실행한 결과가 둘 다 동일하게 성공하는 것을 확인했고,
+`--dry-run`으로 만든 최종 워크플로우 JSON에서 `frame_load_cap`/`amount`가
+의도대로 반영된 것도 확인했습니다. `comfyui_client/cloud_client.py`
+파일 자체는 예전 `scripts/send_to_comfyui.py`에서 **줄 단위로 삭제되거나
+수정된 부분 없이**(`git diff`로 확인) `send_frame()` 함수만 새로 추가됐습니다.
+
 ## 12. 결과를 화면에 순서대로 재생하기 (`play_segments.py`)
 
-`send_to_comfyui.py`가 `output/processed/` 폴더에 결과 영상을 쌓아가면, 이
+`cloud_client.py`가 `output/processed/` 폴더에 결과 영상을 쌓아가면, 이
 스크립트가 그 폴더를 감시하면서 `segment_0001.mp4`부터 순서대로 화면에
 재생합니다. 아직 처리되지 않은 조각은 "처리 대기 중" 화면을 보여주며 기다렸다가,
 파일이 생기는 즉시 이어서 재생합니다 (몇 초 지연은 자연스럽게 흡수됩니다).
@@ -545,7 +594,7 @@ python scripts/play_segments.py
 ```
 터미널 1: python scripts/capture_segments.py                     # 카메라 → segments/
 터미널 2: (segments/에 새 조각이 생길 때마다) extract_pose_points.py 실행
-터미널 3: (JSON이 생길 때마다) send_to_comfyui.py 실행 → output/processed/
+터미널 3: (JSON이 생길 때마다) cloud_client.py 실행 → output/processed/
 터미널 4: python scripts/play_segments.py                        # output/processed/ 재생
 ```
 
@@ -606,7 +655,7 @@ sudo apt-get update && sudo apt-get install -y libegl1 libgl1
 ```
 (Windows/macOS에서는 이 문제가 발생하지 않습니다.)
 
-**`send_to_comfyui.py` 실행 시 "ComfyUI 서버에 연결할 수 없습니다" 라고 나올 때**
+**`cloud_client.py` 실행 시 "ComfyUI 서버에 연결할 수 없습니다" 라고 나올 때**
 → 다음을 확인해 보세요.
 1. ComfyUI가 실제로 실행 중인지 (ComfyUI를 실행하면 보통 터미널에 "Starting server"와
    함께 주소가 표시됩니다)
@@ -615,7 +664,7 @@ sudo apt-get update && sudo apt-get install -y libegl1 libgl1
 3. ComfyUI가 다른 컴퓨터에서 돌고 있다면, 그 컴퓨터의 IP 주소로 `--server`를
    지정해야 합니다 (예: `--server http://192.168.0.10:8188`)
 
-**`send_to_comfyui.py` 실행 시 "워크플로우에 노드 ID '...'가 없습니다" 라고 나올 때**
+**`cloud_client.py` 실행 시 "워크플로우에 노드 ID '...'가 없습니다" 라고 나올 때**
 → `--pose-node-id` 또는 `--video-node-id`로 지정한 번호가 실제 워크플로우 JSON
 파일 안의 노드 ID와 다릅니다. 워크플로우 JSON 파일을 텍스트 편집기로 열어서
 해당 노드(`Sam2VideoSegmentationAddPoints` 등)를 찾고, 그 노드를 감싸는 큰따옴표
